@@ -1,6 +1,4 @@
-
-import datasets
-from datasets import load_dataset
+from datasets import load_dataset, DatasetDict, concatenate_datasets
 from functools import partial
 from torch.utils.data import DataLoader
 from tabulate import tabulate
@@ -59,10 +57,31 @@ def preview_dataloader(dataloader, tokenizer, label_list, num_samples=1):
         print(f"\nSample {sample_idx + 1}")
         print(tabulate(table, headers=["Token", "NER Label"], tablefmt="pretty"))
 
+def rebalance_splits(ds, n_move=8000):
+    val_ds, test_ds = ds["validation"], ds["test"]
+    val_len, test_len = len(val_ds), len(test_ds)
+
+    val_to_train  = val_ds.select(range(val_len - n_move, val_len))
+    test_to_train = test_ds.select(range(test_len - n_move, test_len))
+
+    new_train      = concatenate_datasets([ds["train"], val_to_train, test_to_train])
+    new_validation = val_ds.select(range(0, val_len - n_move))
+    new_test       = test_ds.select(range(0, test_len - n_move))
+
+    return DatasetDict({
+      "train":      new_train,
+      "validation": new_validation,
+      "test":       new_test
+    })
+
 def get_wikiann_lv(tokenizer):
     """Loads the WikiANN-lv dataset and returns train/val/test (pytorch) DataLoaders / (tensorflow) datasets."""
     
     ds = load_dataset("wikiann", "lv")
+
+    ds = rebalance_splits(ds)
+
+    print(f"Dataset size: {len(ds['train'])} train | {len(ds['validation'])} val | {len(ds['test'])} test")
     
     if MAX_SAMPLES_TO_USE != -1:
         ds["train"] = ds["train"].shuffle(seed=42).select(range(MAX_SAMPLES_TO_USE))

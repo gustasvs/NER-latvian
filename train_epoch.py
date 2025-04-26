@@ -36,7 +36,7 @@ def train_epoch(epoch_index, model, dataloader, optimizer, scheduler=None):
 
             total_loss += loss.item()
 
-            pbar.set_postfix(loss=loss.item())
+            pbar.set_postfix(loss=total_loss / (pbar.n + 1))
 
     avg_loss = total_loss / num_batches
     return avg_loss
