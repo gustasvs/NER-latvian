@@ -13,12 +13,12 @@ def main():
         num_labels=num_labels,
         num_layers=4,
         d_input=MAX_SAMPLE_LENGTH,
-        d_model=512,
+        d_model=256,
         d_state=16,
         d_discr=None,
         ker_size=4,
         parallel=False,
-        dropout=0.3
+        dropout=0.1
     )
     checkpoint = torch.load("models/mamba.pt", map_location=DEVICE)
     model.load_state_dict(checkpoint)

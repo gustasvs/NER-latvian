@@ -79,7 +79,7 @@ def get_wikiann_lv(tokenizer):
     
     ds = load_dataset("wikiann", "lv")
 
-    ds = rebalance_splits(ds)
+    ds = rebalance_splits(ds, 7000)
 
     print(f"Dataset size: {len(ds['train'])} train | {len(ds['validation'])} val | {len(ds['test'])} test")
     

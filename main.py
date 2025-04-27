@@ -19,13 +19,15 @@ mamba_model = MambaForTokenClassification(
     num_labels=num_labels,
     num_layers=4,
     d_input=MAX_SAMPLE_LENGTH,
-    d_model=512,
+    d_model=256,
     d_state=16,
     d_discr=None,
     ker_size=4,
     parallel=False,
-    dropout=0.3
+    dropout=0.5
 )
+
+print(f"Number of parameters: {sum(p.numel() for p in mamba_model.parameters()) / 1e6:.2f}M")
 
 # load pre-trained weights if available
 # if os.path.exists("models/mamba.pt"):
