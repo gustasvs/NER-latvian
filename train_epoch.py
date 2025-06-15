@@ -18,7 +18,7 @@ def train_epoch(epoch_index, model, dataloader, optimizer, scheduler=None):
             batch = {k: v.to(DEVICE) for k, v in batch.items()}
             
             # forward pass
-            logits, _ = model(
+            logits = model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
             )

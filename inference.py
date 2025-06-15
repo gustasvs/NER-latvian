@@ -18,7 +18,8 @@ def main():
         d_discr=None,
         ker_size=4,
         parallel=False,
-        dropout=0.1
+        dropout=0.5,
+        bi_directional=True,
     )
     checkpoint = torch.load("models/mamba.pt", map_location=DEVICE)
     model.load_state_dict(checkpoint)
@@ -43,7 +44,7 @@ def main():
         attention_mask = encoding["attention_mask"].to(DEVICE)
 
         with torch.no_grad():
-            logits, _ = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = model(input_ids=input_ids, attention_mask=attention_mask)
         preds = logits.argmax(dim=-1).squeeze().tolist()
 
         tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze().tolist())

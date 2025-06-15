@@ -8,6 +8,8 @@ from transformers import AutoTokenizer
 from helpers.settings import *
 
 def tokenize_and_align_labels(example, tokenizer):
+    # example["tokens"] = [['Nelly', '(', '3', ')'], ['Kurts', 'Aterbergs', '(', "''Kurt", 'Magnus', 'Atterberg', "''", ',', '1887—1974', ')', '—', 'komponists', ';'], ['Igors', 'Stepanovs', '(', '10', '.'], ['1961.—1962.', 'gada', 'NBA', 'sezona'], ['sens', 'nosaukums', '(', 'Ptolemajs', ')']]
+    # example["ner_tags"] =  [[1, 0, 0, 0], [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 2, 0, 0, 0], [3, 4, 4, 4], [0, 0, 0, 1, 0]]
     tokenized = tokenizer(
         example["tokens"],
         is_split_into_words=True,
@@ -55,7 +57,9 @@ def preview_dataloader(dataloader, tokenizer, label_list, num_samples=1):
                 table.append([tok, label_name])
 
         print(f"\nSample {sample_idx + 1}")
-        print(tabulate(table, headers=["Token", "NER Label"], tablefmt="pretty"))
+        headers = ["Token"] + [row[0] for row in table]
+        rows = [["NER Label"] + [row[1] for row in table]]
+        print(tabulate(rows, headers=headers, tablefmt="pretty"))
 
 def rebalance_splits(ds, n_move=8000):
     val_ds, test_ds = ds["validation"], ds["test"]
@@ -79,6 +83,9 @@ def get_wikiann_lv(tokenizer):
     
     ds = load_dataset("wikiann", "lv")
 
+    # first 5 entries in the train set
+    print(ds["train"][:5])
+
     ds = rebalance_splits(ds, 7000)
 
     print(f"Dataset size: {len(ds['train'])} train | {len(ds['validation'])} val | {len(ds['test'])} test")
@@ -96,6 +103,9 @@ def get_wikiann_lv(tokenizer):
 
     label_list = ds["train"].features["ner_tags"].feature.names
     num_labels = len(label_list)
+
+    print("first 5 entries o    f the train set after tokenization:")
+    print(ds["train"][:5])
 
 
     train_loader = DataLoader(ds["train"], batch_size=BATCH_SIZE, shuffle=True)
@@ -115,4 +125,4 @@ if __name__ == "__main__":
     print(f"Validation loader size: {len(val_loader)}")
     print(f"Test loader size: {len(test_loader)}")
 
-    preview_dataloader(train_loader, tokenizer, label_list, num_samples=2)
+    # preview_dataloader(train_loader, tokenizer, label_list, num_samples=20)

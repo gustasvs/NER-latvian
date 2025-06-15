@@ -20,14 +20,14 @@ def validate_epoch(model, dataloader, tokenizer, label_list, batches_to_visualiz
                 
                 batch = {k: v.to(DEVICE) for k, v in batch.items()}
 
-                logits, _ = model(input_ids=batch["input_ids"],
+                logits = model(input_ids=batch["input_ids"],
                                 attention_mask=batch["attention_mask"])
                 loss = loss_fn(
                     logits.view(-1, model.num_labels),
                     batch["labels"].view(-1),
                 )
                 total_loss += loss.item()
-                pbar.set_postfix(loss=total_loss / (pbar.n + 1))
+                pbar.set_postfix(val_loss=total_loss / (pbar.n + 1))
 
                 if batch_idx >= batches_to_visualize:
                     continue
