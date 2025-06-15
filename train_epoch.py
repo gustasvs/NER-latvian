@@ -11,8 +11,17 @@ def train_epoch(epoch_index, model, dataloader, optimizer, scheduler=None):
     num_batches = len(dataloader)
     loss_fn = CrossEntropyLoss(ignore_index=-100)
 
+    # print(f"First batch example: {dataloader.dataset[0]}")
+    # print(f"Second batch example: {dataloader.dataset[1]}")
+    # print(f"Third batch example: {dataloader.dataset[2]}")
+    # print(f"Fourth batch example: {dataloader.dataset[3]}")
+    # print(f"Fifth batch example: {dataloader.dataset[4]}")
+
+
     with tqdm(total=len(dataloader), desc=f"{epoch_index}/{EPOCHS}", leave=True) as pbar:
         for batch in dataloader:
+            # tqdm.write(f"Batch {pbar.n + 1}/{num_batches}", end='\r')
+            # tqdm.write(batch)
             pbar.update(1)
 
             batch = {k: v.to(DEVICE) for k, v in batch.items()}

@@ -1,23 +1,59 @@
-from datasets import load_dataset, DatasetDict, concatenate_datasets
+import os
+
+from tqdm import tqdm
+
+from datasets import load_dataset, DatasetDict, concatenate_datasets, Dataset, ClassLabel, Sequence
 from functools import partial
 from torch.utils.data import DataLoader
 from tabulate import tabulate
 
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, DataCollatorForTokenClassification
 
 from helpers.settings import *
 
-def tokenize_and_align_labels(example, tokenizer):
-    # example["tokens"] = [['Nelly', '(', '3', ')'], ['Kurts', 'Aterbergs', '(', "''Kurt", 'Magnus', 'Atterberg', "''", ',', '1887—1974', ')', '—', 'komponists', ';'], ['Igors', 'Stepanovs', '(', '10', '.'], ['1961.—1962.', 'gada', 'NBA', 'sezona'], ['sens', 'nosaukums', '(', 'Ptolemajs', ')']]
-    # example["ner_tags"] =  [[1, 0, 0, 0], [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 2, 0, 0, 0], [3, 4, 4, 4], [0, 0, 0, 1, 0]]
+tag_map = {
+    "O": 0,
+    "B-PER": 1,
+    "I-PER": 2,
+    "B-person": 1,  # alias for B-PER
+    "I-person": 2,  # alias for I-PER
+    "B-ORG": 3,
+    "I-ORG": 4,
+    "B-organization": 3,  # alias for B-ORG
+    "I-organization": 4,  # alias for I-ORG
+    "B-LOC": 5,
+    "I-LOC": 6,
+    "B-location": 5,  # alias for B-LOC
+    "I-location": 6,  # alias for I-LOC
+    "B-MISC": 7, # all the other tags like entity, GPE, etc.
+    "I-MISC": 8,
+}
+
+label_list = [
+    "O", 
+    "B-PER", "I-PER",
+    "B-ORG", "I-ORG",
+    "B-LOC", "I-LOC",
+    "B-MISC", "I-MISC",
+]
+
+def tokenize_and_align_labels(sentence, tokenizer):
+    # sentence["tokens"] = [['Nelly', '(', '3', ')'], ['Kurts', 'Aterbergs', '(', "''Kurt", 'Magnus', 'Atterberg', "''", ',', '1887—1974', ')', '—', 'komponists', ';'], ['Igors', 'Stepanovs', '(', '10', '.'], ['1961.—1962.', 'gada', 'NBA', 'sezona'], ['sens', 'nosaukums', '(', 'Ptolemajs', ')']]
+    # sentence["ner_tags"] =  [[1, 0, 0, 0], [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 2, 0, 0, 0], [3, 4, 4, 4], [0, 0, 0, 1, 0]]
+    words = sentence["tokens"]
+    ner_tags = sentence["ner_tags"]
+    
     tokenized = tokenizer(
-        example["tokens"],
+        words,
         is_split_into_words=True,
         truncation=True,
         max_length=MAX_SAMPLE_LENGTH,
         padding="max_length",
     )
     word_ids = tokenized.word_ids()
+
+    if len(tokenized['input_ids']) != 64:
+        raise ValueError(f"Tokenization error: {len(tokenized['input_ids'])} != 64. Check the input sentence: {sentence['tokens']}")
     
     labels = []
     previous_word_idx = None
@@ -25,7 +61,7 @@ def tokenize_and_align_labels(example, tokenizer):
         if word_idx is None:
             labels.append(-100)
         elif word_idx != previous_word_idx:
-            labels.append(example["ner_tags"][word_idx])
+            labels.append(ner_tags[word_idx])
         else:
             labels.append(-100)
         previous_word_idx = word_idx
@@ -78,13 +114,98 @@ def rebalance_splits(ds, n_move=8000):
       "test":       new_test
     })
 
-def get_wikiann_lv(tokenizer):
+def ner_tag_map(tag):
+    # https://huggingface.co/datasets/SEACrowd/wikiann
+    # O (0), B-PER (1), I-PER (2), B-ORG (3), I-ORG (4), B-LOC (5), I-LOC (6)
+    
+    # if not found print it and stop the application
+    is_unknown = tag not in tag_map
+    is_start = tag.startswith("B")
+    if is_unknown:
+        # print(f"Unknown NER tag: {tag}")
+        if is_start:
+            # B-MISC
+            return 7
+        else:
+            # I-MISC
+            return 8
+
+    return tag_map.get(tag, 7)
+
+def extract_sentences_from_conll(file):
+    sentences = []
+    current_sentence = {"words": [], "ner_tags": [], 'id': None}
+
+    # first 2 lines are metadata
+    lines = file.readlines()[2:]
+
+    for line in lines:
+        line = line.strip()
+        # empty lines divide sentences
+        if not line:
+            if current_sentence["words"]:
+                sentences.append(current_sentence)
+                current_sentence = {"words": [], "ner_tags": []}
+            continue
+
+        # first two lines of the sentences are also a sentence specific metadata
+        if line.startswith("#"):
+            if line.startswith("# sent_id"):
+                current_sentence["id"] = line.split(" = ")[1].strip()
+            continue
+
+        line_parts = line.split("\t")
+        word = line_parts[1]
+        ner_tag = line_parts[6]
+
+        current_sentence["words"].append(word)
+        current_sentence["ner_tags"].append(ner_tag_map(ner_tag))
+
+    # there should be an empty line at the end of the file, but just in case
+    if current_sentence["words"]:
+        sentences.append(current_sentence)
+
+    return sentences
+
+
+def get_LUMII_lv():
+    """Loads the LUMII-lv dataset and returns array of data."""
+    
+    if not os.path.exists("data/LUMII-AiLab"):
+        raise FileNotFoundError("LUMII-AiLab dataset not found. Fetch it using `fetch_LUMII_data.py` script.")
+    
+    data = []
+    sentences_with_atleast_one_entity = 0
+
+    files = os.listdir("data/LUMII-AiLab")
+
+    with tqdm(files, desc="Processing LUMII files") as pbar:
+        for conll_file in pbar:
+            with open(os.path.join("data/LUMII-AiLab", conll_file), "r", encoding="utf-8") as f:
+                sentences_in_file = extract_sentences_from_conll(f)
+                data.extend(sentences_in_file)
+
+                for sentence in sentences_in_file:
+                    if any(tag != 0 for tag in sentence["ner_tags"]):
+                        sentences_with_atleast_one_entity += 1
+
+            pbar.set_postfix_str(
+                f"Total: {str(len(data)).ljust(5)}, With atleast one NER tag: {str(sentences_with_atleast_one_entity).ljust(5)}"
+            )
+            # tqdm.write(f"sentences in file: {conll_file} -> {sentences_in_file}")
+    return Dataset.from_dict({
+        "tokens": [sentence["words"] for sentence in data],
+        "ner_tags": [sentence["ner_tags"] for sentence in data],
+        # "id": [sentence["id"] for sentence in data]
+    })
+
+
+def get_wikiann_lv():
     """Loads the WikiANN-lv dataset and returns train/val/test (pytorch) DataLoaders / (tensorflow) datasets."""
     
     ds = load_dataset("wikiann", "lv")
 
-    # first 5 entries in the train set
-    print(ds["train"][:5])
+    # print(ds["train"][:5])
 
     ds = rebalance_splits(ds, 7000)
 
@@ -95,34 +216,88 @@ def get_wikiann_lv(tokenizer):
         ds["validation"] = ds["validation"].shuffle(seed=42).select(range(MAX_SAMPLES_TO_USE))
         ds["test"] = ds["test"].shuffle(seed=42).select(range(MAX_SAMPLES_TO_USE))
 
+    return ds
+
+
+def get_data_loaders(tokenizer, wikiann=True, lumii=True):
+    if not wikiann and not lumii:
+        raise ValueError("get_data_loaders function expects at least one dataset to be True.")
+
     fn = partial(tokenize_and_align_labels, tokenizer=tokenizer)
-    ds = ds.map(fn, batched=False)
+    combined_parts = {"train": [], "validation": [], "test": []}
 
-    ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
+    if wikiann:
+        wikiann_ds = get_wikiann_lv()
+        print("Tokenizing WikiANN dataset...")
+        wikiann_ds = wikiann_ds.map(fn, batched=False)
+        # since it doesnt have the MISC labels we have to add them manually
+        wikiann_ds = wikiann_ds.cast_column(
+            "ner_tags",
+            Sequence(feature=ClassLabel(names=label_list))
+        )
+        for split in ["train", "validation", "test"]:
+            combined_parts[split].append(wikiann_ds[split])
+
+        # print("wikiann label list:", wikiann_ds["train"].features["ner_tags"].feature.names)
+
+    if lumii:
+        lumii_ds = get_LUMII_lv()
+        print("Tokenizing LUMII dataset...")
+        lumii_ds = lumii_ds.map(fn, batched=False)
+        # same way here, we have to add the MISC labels manually
+        lumii_ds = lumii_ds.cast_column(
+            "ner_tags",
+            Sequence(feature=ClassLabel(names=label_list))
+        )
+
+        n = len(lumii_ds)
+        t_sz, v_sz = int(0.1 * n), int(0.1 * n)
+
+        lumii_test = lumii_ds.select(range(t_sz))
+        lumii_val = lumii_ds.select(range(t_sz, t_sz + v_sz))
+        lumii_train = lumii_ds.select(range(t_sz + v_sz, n))
+
+        combined_parts["train"].append(lumii_train)
+        combined_parts["validation"].append(lumii_val)
+        combined_parts["test"].append(lumii_test)
+
+        # print("lumii label list:", lumii_ds.features["ner_tags"].feature.names)
 
 
-    label_list = ds["train"].features["ner_tags"].feature.names
-    num_labels = len(label_list)
+    combined_ds = DatasetDict({
+        split: concatenate_datasets(splits) if len(splits) > 1 else splits[0]
+        for split, splits in combined_parts.items()
+    })
+    # combined_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
 
-    print("first 5 entries o    f the train set after tokenization:")
-    print(ds["train"][:5])
+    # label_list = combined_ds["train"].features["ner_tags"].feature.names
+
+    # print("first 5 entries o    f the train set after tokenization:")
+    # print(combined_ds["train"][:5])
+
+    combined_ds = combined_ds.remove_columns(["tokens", "ner_tags", 'langs', 'spans'])
+    print("remaining columns:", combined_ds["train"].column_names)
+    data_collator = DataCollatorForTokenClassification(tokenizer,
+                                                   label_pad_token_id=-100)
 
 
-    train_loader = DataLoader(ds["train"], batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(ds["validation"], batch_size=BATCH_SIZE)
-    test_loader = DataLoader(ds["test"], batch_size=BATCH_SIZE)
+    train_loader = DataLoader(combined_ds["train"], batch_size=BATCH_SIZE, shuffle=True, collate_fn=data_collator)
+    val_loader = DataLoader(combined_ds["validation"], batch_size=BATCH_SIZE, collate_fn=data_collator)
+    test_loader = DataLoader(combined_ds["test"], batch_size=BATCH_SIZE, collate_fn=data_collator)
 
-    return train_loader, val_loader, test_loader, num_labels, label_list
-
+    return train_loader, val_loader, test_loader, len(label_list), label_list
 
 if __name__ == "__main__":
-    tokenizer = AutoTokenizer.from_pretrained("distilbert-base-multilingual-cased")
+    
+    tokenizer = AutoTokenizer.from_pretrained("distilbert-base-multilingual-cased", resume_download=None)
 
-    train_loader, val_loader, test_loader, num_labels, label_list = get_wikiann_lv(tokenizer)
+    train_loader, val_loader, test_loader, num_labels, label_list = get_data_loaders(tokenizer, wikiann=True, lumii=True)
+
+
     print(f"Number of labels: {num_labels}")
     print(f"Label list: {label_list}")
-    print(f"Train loader size: {len(train_loader)}")
-    print(f"Validation loader size: {len(val_loader)}")
-    print(f"Test loader size: {len(test_loader)}")
+    print(f"Train loader size: {len(train_loader)}, total samples: {len(train_loader.dataset)}")
+    print(f"Validation loader size: {len(val_loader)}, total samples: {len(val_loader.dataset)}")
+    print(f"Test loader size: {len(test_loader)}, total samples: {len(test_loader.dataset)}")
 
     # preview_dataloader(train_loader, tokenizer, label_list, num_samples=20)

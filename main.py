@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 from mamba import MambaForTokenClassification
 from transformer import DistilBertForTokenClassification
 from helpers.settings import *
-from get_data import get_wikiann_lv
+from get_data import get_data_loaders
 from train_epoch import train_epoch
 from validate_epoch import validate_epoch
 from helpers.prepare_environment import prepare_environment
@@ -13,7 +13,8 @@ from helpers.plot_losses import plot_losses
 prepare_environment(os.path.dirname(os.path.abspath(__file__)))
 
 tokenizer = AutoTokenizer.from_pretrained("distilbert-base-multilingual-cased")
-train_dataloader, val_dataloader, test_dataloader, num_labels, label_list = get_wikiann_lv(tokenizer)
+
+train_dataloader, val_dataloader, test_dataloader, num_labels, label_list = get_data_loaders(tokenizer, True, True)
 
 # mamba_model = MambaForTokenClassification(
 #     vocab_size=tokenizer.vocab_size,
@@ -62,7 +63,7 @@ def train():
             val_dataloader,
             tokenizer,
             label_list,
-            batches_to_visualize=2,
+            batches_to_visualize=1,
         )
         torch.save(
             mamba_model.state_dict(),

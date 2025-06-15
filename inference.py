@@ -1,6 +1,7 @@
 import torch
 from transformers import AutoTokenizer
 from mamba import MambaForTokenClassification
+from transformer import DistilBertForTokenClassification
 from helpers.settings import MAX_SAMPLE_LENGTH, DEVICE
 from get_data import get_wikiann_lv
 
@@ -8,19 +9,26 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained("distilbert-base-multilingual-cased")
     _, _, _, num_labels, label_list = get_wikiann_lv(tokenizer)
 
-    model = MambaForTokenClassification(
-        vocab_size=tokenizer.vocab_size,
+    # model = MambaForTokenClassification(
+    #     vocab_size=tokenizer.vocab_size,
+    #     num_labels=num_labels,
+    #     num_layers=4,
+    #     d_input=MAX_SAMPLE_LENGTH,
+    #     d_model=256,
+    #     d_state=16,
+    #     d_discr=None,
+    #     ker_size=4,
+    #     parallel=False,
+    #     dropout=0.5,
+    #     bi_directional=True,
+    # )
+
+    model = DistilBertForTokenClassification(
         num_labels=num_labels,
-        num_layers=4,
-        d_input=MAX_SAMPLE_LENGTH,
-        d_model=256,
-        d_state=16,
-        d_discr=None,
-        ker_size=4,
-        parallel=False,
-        dropout=0.5,
-        bi_directional=True,
+        pretrained_model_name="distilbert-base-multilingual-cased",
+        dropout=0.1,
     )
+
     checkpoint = torch.load("models/mamba.pt", map_location=DEVICE)
     model.load_state_dict(checkpoint)
     model.to(DEVICE).eval()
