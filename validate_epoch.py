@@ -1,17 +1,21 @@
 import torch
 from tqdm import tqdm
 from tabulate import tabulate
+from torch.nn import CrossEntropyLoss
+from seqeval.metrics import precision_score, recall_score, f1_score
 
-from helpers.settings import EPOCHS, DEVICE
+from train_epoch import align_preds
+from helpers.settings import DEVICE
 
-
+@torch.no_grad()
 def validate_epoch(model, dataloader, tokenizer, label_list, batches_to_visualize=0):
     model.eval() # make sure model is in eval mode
 
     total_loss = 0.0
+    all_preds, all_labels = [], []
     num_batches = len(dataloader)
     assert num_batches > 0, "No batches to validate on."
-    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-100)
+    loss_fn = CrossEntropyLoss(ignore_index=-100)
 
     with torch.no_grad():
         with tqdm(total=len(dataloader), desc=f"Validation set", leave=True) as pbar:
@@ -29,9 +33,14 @@ def validate_epoch(model, dataloader, tokenizer, label_list, batches_to_visualiz
                 total_loss += loss.item()
                 pbar.set_postfix(val_loss=total_loss / (pbar.n + 1))
 
+                preds, labels = align_preds(logits, batch["labels"], label_list)
+                all_preds.extend(preds)
+                all_labels.extend(labels)
+
                 if batch_idx >= batches_to_visualize:
                     continue
 
+                # [x] for development visualization
                 input_ids = batch["input_ids"].to(DEVICE)
                 attention_mask = batch["attention_mask"].to(DEVICE)
                 true_labels = batch["labels"].to(DEVICE)
@@ -72,4 +81,14 @@ def validate_epoch(model, dataloader, tokenizer, label_list, batches_to_visualiz
 
                     print(tabulate(rows, headers=["Token", "True", "Pred"], tablefmt="pretty"))
 
-    return total_loss / num_batches
+    avg_loss = total_loss / num_batches
+    precision = precision_score(all_labels, all_preds)
+    recall = recall_score(all_labels, all_preds)
+    f1 = f1_score(all_labels, all_preds)
+
+    return {
+        "loss": avg_loss,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }

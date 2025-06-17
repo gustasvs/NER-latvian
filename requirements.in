@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
+numpy==1.23.2
+torch
+transformers
+datasets
+tqdm
+tabulate
+seqeval
+einops
+matplotlib

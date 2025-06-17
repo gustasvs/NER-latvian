@@ -1,21 +1,36 @@
+import torch
 from tqdm import tqdm
 from torch.nn import CrossEntropyLoss
+from seqeval.metrics import precision_score, recall_score, f1_score
 
 from helpers.settings import EPOCHS, DEVICE
 
-def train_epoch(epoch_index, model, dataloader, optimizer, scheduler=None):
+def align_preds(logits, label_ids, label_list):
+
+    preds = torch.argmax(logits, dim=-1).cpu().numpy()
+    label_ids = label_ids.cpu().numpy()
+
+    true_preds, true_labels = [], []
+    for p_row, l_row in zip(preds, label_ids):
+        sent_pred, sent_label = [], []
+        for p, l in zip(p_row, l_row):
+            # ignore index
+            if l == -100:
+                continue
+            sent_pred.append(label_list[p])
+            sent_label.append(label_list[l])
+        true_preds.append(sent_pred)
+        true_labels.append(sent_label)
+    return true_preds, true_labels
+
+def train_epoch(epoch_index, model, dataloader, optimizer, label_list):
 
     model.train() # make sure model is in train mode
 
     total_loss = 0.0
+    all_preds, all_labels = [], []
     num_batches = len(dataloader)
     loss_fn = CrossEntropyLoss(ignore_index=-100)
-
-    # print(f"First batch example: {dataloader.dataset[0]}")
-    # print(f"Second batch example: {dataloader.dataset[1]}")
-    # print(f"Third batch example: {dataloader.dataset[2]}")
-    # print(f"Fourth batch example: {dataloader.dataset[3]}")
-    # print(f"Fifth batch example: {dataloader.dataset[4]}")
 
 
     with tqdm(total=len(dataloader), desc=f"{epoch_index}/{EPOCHS}", leave=True) as pbar:
@@ -41,11 +56,27 @@ def train_epoch(epoch_index, model, dataloader, optimizer, scheduler=None):
             loss.backward()
             optimizer.step()
             
-            if scheduler: scheduler.step()
+            # if scheduler: scheduler.step()
 
             total_loss += loss.item()
 
-            pbar.set_postfix(loss=total_loss / (pbar.n + 1))
+            # metrics
+            # preds, labels = align_preds(logits.detach(), batch["labels"], label_list)
+            # all_preds.extend(preds)
+            # all_labels.extend(labels)
+            # f1_running = f1_score(all_labels, all_preds) if all_preds else 0.0
+            f1_running = 0.0
+
+            pbar.set_postfix(loss=total_loss / (pbar.n + 1), f1=f1_running)
 
     avg_loss = total_loss / num_batches
-    return avg_loss
+    precision = precision_score(all_labels, all_preds)
+    recall = recall_score(all_labels, all_preds)
+    f1 = f1_score(all_labels, all_preds)
+
+    return {
+        "loss": avg_loss,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }

@@ -220,40 +220,51 @@ def get_wikiann_lv():
     return ds
 
 def get_translated_wikiann_lv():
-    if not os.path.exists("translated/conll_test.npy"):
+    if not os.path.exists("translated"):
         raise FileNotFoundError("Translated WikiANN dataset not found. Generate it by running `translation.py` script.")
 
-    with open("translated_v1/conll_train_pure.pkl", "rb") as f:
-        train_data = pickle.load(f)
+    # with open("translated_v1/conll_train_pure.pkl", "rb") as f:
+    #     train_data = pickle.load(f)
 
-    with open("translated_v1/conll_validation_pure.pkl", "rb") as f:
-        val_data = pickle.load(f)
+    # with open("translated_v1/conll_validation_pure.pkl", "rb") as f:
+    #     val_data = pickle.load(f)
 
-    with open("translated_v1/conll_test_pure.pkl", "rb") as f:
-        test_data = pickle.load(f)
+    # with open("translated_v1/conll_test_pure.pkl", "rb") as f:
+    #     test_data = pickle.load(f)
 
-
-    # print("train_data[0]:", train_data[0])
-    # exit()
+    with open("translated_ner_fixed/fixed_ner_train.json", "r", encoding="utf-8") as f:
+        train_data = json.load(f)
+    with open("translated_ner_fixed/fixed_ner_validation.json", "r", encoding="utf-8") as f:
+        val_data = json.load(f)
+    with open("translated_ner_fixed/fixed_ner_test.json", "r", encoding="utf-8") as f:
+        test_data = json.load(f)
+    
+    def string_to_word_list(s):
+        return s.split()
 
     ds = DatasetDict({
         "train": Dataset.from_dict({
-            "tokens": [item[0] for item in train_data],
+            "tokens": [string_to_word_list(item[0]) for item in train_data],
             "ner_tags": [[ner_tag_map(tag) for tag in item[1]] for item in train_data],
         }),
         "validation": Dataset.from_dict({
-            "tokens": [item[0] for item in val_data],
+            "tokens": [string_to_word_list(item[0]) for item in val_data],
             "ner_tags": [[ner_tag_map(tag) for tag in item[1]] for item in val_data],
         }),
         "test": Dataset.from_dict({
-            "tokens": [item[0] for item in test_data],
+            "tokens": [string_to_word_list(item[0]) for item in test_data],
             "ner_tags": [[ner_tag_map(tag) for tag in item[1]] for item in test_data],
         })
     })
     return ds
 
 
-def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=True):
+def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=True, use_cache=True):
+    """
+        val dataloader ALWAYS consists of the combination of WikiANN and LUMII datasets.
+        returns train, val, test dataloaders
+    """
+
     if not wikiann and not lumii and not translated_wikiann:
         raise ValueError("get_data_loaders function expects at least one dataset to be True.")
 
@@ -261,18 +272,38 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
     combined_parts = {"train": [], "validation": [], "test": []}
 
     if translated_wikiann:
-        translated_wikiann_ds = get_translated_wikiann_lv()
-        print("Tokenizing Translated WikiANN dataset...")
-        translated_wikiann_ds = translated_wikiann_ds.map(fn, batched=False)
-        # same way here, we have to add the MISC labels manually
-        translated_wikiann_ds = translated_wikiann_ds.cast_column(
-            "ner_tags",
-            Sequence(feature=ClassLabel(names=label_list))
-        )
-        for split in ["train", "validation", "test"]:
-            combined_parts[split].append(translated_wikiann_ds[split])
+        if use_cache and os.path.exists("cache/translated_wikiann.pkl"):
+            print("Loading Translated WikiANN dataset from cache...")
+            with open("cache/translated_wikiann.pkl", "rb") as f:
+                translated_wikiann_ds = pickle.load(f)
+        else:
+            translated_wikiann_ds = get_translated_wikiann_lv()
+            print("Tokenizing Translated WikiANN dataset...")
+            translated_wikiann_ds = translated_wikiann_ds.map(fn, batched=False)
+            # same way here, we have to add the MISC labels manually
+            translated_wikiann_ds = translated_wikiann_ds.cast_column(
+                "ner_tags",
+                Sequence(feature=ClassLabel(names=label_list))
+            )
+            with open("cache/translated_wikiann.pkl", "wb") as f:
+                pickle.dump(translated_wikiann_ds, f)
 
-    if wikiann:
+        # we never use translated data for validation or testing
+        combined_parts["train"].extend([
+            translated_wikiann_ds["train"],
+            translated_wikiann_ds["validation"],
+            translated_wikiann_ds["test"]
+        ])
+
+
+    # if wikiann:
+    # 
+    if use_cache and os.path.exists("cache/wikiann.pkl"):
+        print("Loading WikiANN dataset from cache...")
+        with open("cache/wikiann.pkl", "rb") as f:
+            wikiann_ds = pickle.load(f)
+
+    else:
         wikiann_ds = get_wikiann_lv()
         print("Tokenizing WikiANN dataset...")
         wikiann_ds = wikiann_ds.map(fn, batched=False)
@@ -281,12 +312,25 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
             "ner_tags",
             Sequence(feature=ClassLabel(names=label_list))
         )
-        for split in ["train", "validation", "test"]:
-            combined_parts[split].append(wikiann_ds[split])
+        with open("cache/wikiann.pkl", "wb") as f:
+            pickle.dump(wikiann_ds, f)
+    
+    if wikiann:
+        combined_parts["train"].append(wikiann_ds["train"])
+    # wikiann always goes to validation and test splits
+    combined_parts["validation"].append(wikiann_ds["validation"])
+    combined_parts["test"].append(wikiann_ds["test"])
 
-        # print("wikiann label list:", wikiann_ds["train"].features["ner_tags"].feature.names)
 
-    if lumii:
+    if use_cache and os.path.exists("cache/lumii.pkl"):
+        print("Loading LUMII dataset from cache...")
+        with open("cache/lumii.pkl", "rb") as f:
+            lumii_ds = pickle.load(f)
+
+            lumii_train = lumii_ds["train"]
+            lumii_val = lumii_ds["validation"]
+            lumii_test = lumii_ds["test"]
+    else: 
         lumii_ds = get_LUMII_lv()
         print("Tokenizing LUMII dataset...")
         lumii_ds = lumii_ds.map(fn, batched=False)
@@ -303,28 +347,28 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
         lumii_val = lumii_ds.select(range(t_sz, t_sz + v_sz))
         lumii_train = lumii_ds.select(range(t_sz + v_sz, n))
 
+        with open("cache/lumii.pkl", "wb") as f:
+            pickle.dump({
+                "train": lumii_train,
+                "validation": lumii_val,
+                "test": lumii_test
+            }, f)
+
+    if lumii:
         combined_parts["train"].append(lumii_train)
-        combined_parts["validation"].append(lumii_val)
-        combined_parts["test"].append(lumii_test)
 
-
+    # lumii always goes to validation and test splits
+    combined_parts["validation"].append(lumii_val)
+    combined_parts["test"].append(lumii_test)
 
     combined_ds = DatasetDict({
         split: concatenate_datasets(splits) if len(splits) > 1 else splits[0]
         for split, splits in combined_parts.items()
     })
-    # combined_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-
-    # label_list = combined_ds["train"].features["ner_tags"].feature.names
-
-    # print("first 5 entries o    f the train set after tokenization:")
-    # print(combined_ds["train"][:5])
-
+    # clean up columns
     combined_ds = combined_ds.remove_columns(["tokens", "ner_tags", 'langs', 'spans'])
-    print("remaining columns:", combined_ds["train"].column_names)
-    data_collator = DataCollatorForTokenClassification(tokenizer,
-                                                   label_pad_token_id=-100)
-
+    
+    data_collator = DataCollatorForTokenClassification(tokenizer, label_pad_token_id=-100)
 
     train_loader = DataLoader(combined_ds["train"], batch_size=BATCH_SIZE, shuffle=True, collate_fn=data_collator)
     val_loader = DataLoader(combined_ds["validation"], batch_size=BATCH_SIZE, collate_fn=data_collator)

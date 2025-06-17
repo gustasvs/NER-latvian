@@ -14,70 +14,111 @@ prepare_environment(os.path.dirname(os.path.abspath(__file__)))
 
 tokenizer = AutoTokenizer.from_pretrained("distilbert-base-multilingual-cased")
 
-train_dataloader, val_dataloader, test_dataloader, num_labels, label_list = get_data_loaders(tokenizer, True, True)
 
-# mamba_model = MambaForTokenClassification(
-#     vocab_size=tokenizer.vocab_size,
-#     num_labels=num_labels,
-#     num_layers=4,
-#     d_input=MAX_SAMPLE_LENGTH,
-#     d_model=256,
-#     d_state=16,
-#     d_discr=None,
-#     ker_size=4,
-#     parallel=False,
-#     dropout=0.5,
-#     bi_directional=True,
-# )
+def get_model(name, num_labels):
+    if name == "mamba":
+        model = MambaForTokenClassification(
+            vocab_size=tokenizer.vocab_size,
+            num_labels=num_labels,
+            num_layers=4,
+            d_input=MAX_SAMPLE_LENGTH,
+            d_model=256,
+            d_state=16,
+            d_discr=None,
+            ker_size=4,
+            parallel=False,
+            dropout=0.5,
+            bi_directional=True,
+        )
+    elif name == "distilbert":
+        model = DistilBertForTokenClassification(
+            num_labels=num_labels,
+            pretrained_model_name="distilbert-base-multilingual-cased",
+            dropout=0.1,
+        )
 
-mamba_model = DistilBertForTokenClassification(
-    num_labels=num_labels,
-    pretrained_model_name="distilbert-base-multilingual-cased",
-    dropout=0.1,
-)
+    print(f"Number of parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M")
 
-print(f"Number of parameters: {sum(p.numel() for p in mamba_model.parameters()) / 1e6:.2f}M")
+    model.to(DEVICE)
+    print(f"Model is on {DEVICE}")
 
-# load pre-trained weights if available
-# if os.path.exists("models/mamba.pt"):
-#     mamba_model.load_state_dict(torch.load("models/mamba.pt"))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.00005)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
+    return model, optimizer  # , scheduler
 
-mamba_model.to(DEVICE)
+def train(model, optimizer, train_dataloader, val_dataloader, label_list):
+    # store final outputs
+    training_metrics = []
+    validation_metrics = []
+    
+    # for early stopping
+    lowest_val_loss = float("inf")
 
-optimizer = torch.optim.AdamW(mamba_model.parameters(), lr=0.00005)
-# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
-
-def train():
-    train_losses = []
-    val_losses = []
     for epoch in range(EPOCHS):
-        avg_train_loss = train_epoch(
+        train_metrics = train_epoch(
             epoch + 1,
-            mamba_model,
+            model,
             train_dataloader,
             optimizer,
-            # scheduler=scheduler,
+            label_list,
         )
-        avg_val_loss = validate_epoch(
-            mamba_model,
+        val_metrics = validate_epoch(
+            model,
             val_dataloader,
             tokenizer,
             label_list,
-            batches_to_visualize=1,
+            batches_to_visualize=0,
         )
-        torch.save(
-            mamba_model.state_dict(),
-            f"models/mamba.pt"
-        )
-        train_losses.append(avg_train_loss)
-        val_losses.append(avg_val_loss)
+
+        training_metrics.append(train_metrics)
+        validation_metrics.append(val_metrics)
+
+        if val_metrics["loss"] < lowest_val_loss:
+            lowest_val_loss = val_metrics["loss"]
+            
+            # save only the best model
+            torch.save(
+                model.state_dict(),
+                f"models/mamba_best.pt"
+            )
+        else:
+            print(f"Validation loss {val_metrics['loss']:.2f} did not improve from {lowest_val_loss:.2f}, stopping training.")
+            # early stopping
+            break
+            
     
-    return train_losses, val_losses
+    return training_metrics, validation_metrics
+
+
+def main():
+    # performs grid search for models and data.
+    # models = ["mamba", "distilbert"]
+    models = ["distilbert"]
+    datasets = ["wikiann", "lumii", "translated_wikiann"]
+
+    for model in models:
+        for dataset in datasets:
+            print(f"{'-' * 5} Training {model} on {dataset} {'-' * 5}")
+            train_dataloader, val_dataloader, test_dataloader, num_labels, label_list = \
+                get_data_loaders(tokenizer, True, True, True, True)
+                # get_data_loaders(tokenizer, dataset, w
+
+            model, optimizer = get_model(model, num_labels)
+
+            train_metrics, val_metrics = train(
+                model,
+                optimizer,
+                train_dataloader,
+                val_dataloader,
+                label_list,
+            )
+
+            print(f"training_metrics: {train_metrics}")
+            print(f"validation_metrics: {val_metrics}")
 
 
 if __name__ == "__main__":
-    train_losses, val_losses = train()
-    plot_losses(train_losses, val_losses)
+    main()
 
     
 
