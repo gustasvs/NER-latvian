@@ -65,14 +65,18 @@ def train_epoch(epoch_index, model, dataloader, optimizer, label_list):
             # all_preds.extend(preds)
             # all_labels.extend(labels)
             # f1_running = f1_score(all_labels, all_preds) if all_preds else 0.0
-            f1_running = 0.0
+            # f1_running = 0.0
 
-            pbar.set_postfix(loss=total_loss / (pbar.n + 1), f1=f1_running)
+            if (pbar.n + 1) % 10 == 0:
+                pbar.set_postfix(loss=total_loss / (pbar.n + 1), memo_aloc=torch.cuda.memory_allocated(), memo_reserved=torch.cuda.memory_reserved())
 
     avg_loss = total_loss / num_batches
-    precision = precision_score(all_labels, all_preds)
-    recall = recall_score(all_labels, all_preds)
-    f1 = f1_score(all_labels, all_preds)
+    # precision = precision_score(all_labels, all_preds)
+    # recall = recall_score(all_labels, all_preds)
+    # f1 = f1_score(all_labels, all_preds)
+    precision = 0.0
+    recall = 0.0
+    f1 = 0.0
 
     return {
         "loss": avg_loss,

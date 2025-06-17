@@ -295,9 +295,8 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
             translated_wikiann_ds["test"]
         ])
 
-
     # if wikiann:
-    # 
+    #
     if use_cache and os.path.exists("cache/wikiann.pkl"):
         print("Loading WikiANN dataset from cache...")
         with open("cache/wikiann.pkl", "rb") as f:
@@ -314,13 +313,12 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
         )
         with open("cache/wikiann.pkl", "wb") as f:
             pickle.dump(wikiann_ds, f)
-    
+
     if wikiann:
         combined_parts["train"].append(wikiann_ds["train"])
     # wikiann always goes to validation and test splits
     combined_parts["validation"].append(wikiann_ds["validation"])
     combined_parts["test"].append(wikiann_ds["test"])
-
 
     if use_cache and os.path.exists("cache/lumii.pkl"):
         print("Loading LUMII dataset from cache...")
@@ -367,12 +365,24 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
     })
     # clean up columns
     combined_ds = combined_ds.remove_columns(["tokens", "ner_tags", 'langs', 'spans'])
-    
+
     data_collator = DataCollatorForTokenClassification(tokenizer, label_pad_token_id=-100)
 
-    train_loader = DataLoader(combined_ds["train"], batch_size=BATCH_SIZE, shuffle=True, collate_fn=data_collator)
-    val_loader = DataLoader(combined_ds["validation"], batch_size=BATCH_SIZE, collate_fn=data_collator)
-    test_loader = DataLoader(combined_ds["test"], batch_size=BATCH_SIZE, collate_fn=data_collator)
+    train_loader = DataLoader(
+        combined_ds["train"],
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        collate_fn=data_collator,
+        num_workers=2,
+        pin_memory=True,
+        prefetch_factor=2
+    )
+    val_loader = DataLoader(
+        combined_ds["validation"], batch_size=BATCH_SIZE, collate_fn=data_collator
+    )
+    test_loader = DataLoader(
+        combined_ds["test"], batch_size=BATCH_SIZE, collate_fn=data_collator
+    )
 
     return train_loader, val_loader, test_loader, len(label_list), label_list
 

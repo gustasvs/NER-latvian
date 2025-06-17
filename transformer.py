@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import DistilBertModel, DistilBertConfig
+from transformers import DistilBertModel, DistilBertConfig, AutoModel
 
 class DistilBertForTokenClassification(nn.Module):
     def __init__(
@@ -11,7 +11,8 @@ class DistilBertForTokenClassification(nn.Module):
     ):
         super().__init__()
         # backbone
-        self.bert = DistilBertModel.from_pretrained(pretrained_model_name)
+        self.bert = AutoModel.from_pretrained("prajjwal1/bert-tiny")
+        # self.bert = DistilBertModel.from_pretrained(pretrained_model_name)
         hidden = self.bert.config.hidden_size
 
         # classification head

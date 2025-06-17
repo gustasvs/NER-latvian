@@ -85,6 +85,7 @@ def validate_epoch(model, dataloader, tokenizer, label_list, batches_to_visualiz
     precision = precision_score(all_labels, all_preds)
     recall = recall_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds)
+    print(f"val loss: {avg_loss:.2f}, precision: {precision:.2f}, recall: {recall:.2f}, f1: {f1:.2f}")
 
     return {
         "loss": avg_loss,
