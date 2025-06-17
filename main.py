@@ -17,13 +17,14 @@ tokenizer = AutoTokenizer.from_pretrained("distilbert-base-multilingual-cased")
 
 def get_model(name, num_labels):
     if name == "mamba":
+        # L=8, d_model=1024, d_state=128 → 134.1M
         model = MambaForTokenClassification(
             vocab_size=tokenizer.vocab_size,
             num_labels=num_labels,
-            num_layers=4,
+            num_layers=8,
             d_input=MAX_SAMPLE_LENGTH,
-            d_model=256,
-            d_state=16,
+            d_model=128,
+            d_state=32,
             d_discr=None,
             ker_size=4,
             parallel=False,
@@ -92,8 +93,8 @@ def train(model, optimizer, train_dataloader, val_dataloader, label_list):
 
 def main():
     # performs grid search for models and data.
-    # models = ["mamba", "distilbert"]
-    models = ["distilbert"]
+    models = ["mamba"]
+    # models = ["distilbert"]
     datasets = ["wikiann", "lumii", "translated_wikiann"]
 
     for model in models:
