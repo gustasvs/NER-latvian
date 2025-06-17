@@ -44,6 +44,7 @@ class MambaForTokenClassification(nn.Module):
         # classification head
         self.dropout = nn.Dropout(dropout)
         _d_input = d_input * 2 if bi_directional else d_input
+        self.norm = nn.LayerNorm(_d_input)
         self.classifier = nn.Linear(_d_input, num_labels)
         self.num_labels = num_labels
         self.bi_directional = bi_directional
@@ -60,16 +61,17 @@ class MambaForTokenClassification(nn.Module):
             x = x * attention_mask.unsqueeze(-1)
         
         # Encode sequence → (B, L, d_input)
-        x, new_cache = self.encoder_fwd(x, cache=cache)
+        x, new_cache = self.encoder_fwd(x, cache=None)
         
         if self.bi_directional:
             # Encode sequence in reverse direction → (B, L, d_input)
             x_rev = torch.flip(x, dims=[1])
-            x_bwd, _ = self.encoder_bwd(x_rev, cache=cache)
+            x_bwd, _ = self.encoder_bwd(x_rev, cache=None)
             x = torch.cat([x, torch.flip(x_bwd, dims=[1])], dim=-1)
 
 
         # Head → logits (B, L, num_labels)
+        x = self.norm(x)
         x = self.dropout(x)
         logits = self.classifier(x)
 

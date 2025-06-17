@@ -55,6 +55,7 @@ def train_epoch(epoch_index, model, dataloader, optimizer, label_list):
             # backward pass
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
             # if scheduler: scheduler.step()

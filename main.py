@@ -21,16 +21,22 @@ def get_model(name, num_labels):
         model = MambaForTokenClassification(
             vocab_size=tokenizer.vocab_size,
             num_labels=num_labels,
-            num_layers=8,
+            num_layers=16,
             d_input=MAX_SAMPLE_LENGTH,
-            d_model=128,
-            d_state=32,
+            d_model=312,
+            d_state=64,
             d_discr=None,
             ker_size=4,
             parallel=False,
-            dropout=0.5,
-            bi_directional=True,
+            dropout=0.1,
+            bi_directional=False,
         )
+        # load pretrained weights if available
+        # if os.path.exists("models/mamba_best.pt"):
+        #     print("Loading pretrained Mamba model weights...")
+        #     model.load_state_dict(torch.load("models/mamba_best.pt", map_location=DEVICE))
+
+
     elif name == "distilbert":
         model = DistilBertForTokenClassification(
             num_labels=num_labels,
@@ -43,7 +49,7 @@ def get_model(name, num_labels):
     model.to(DEVICE)
     print(f"Model is on {DEVICE}")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.00005)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.00004)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
     return model, optimizer  # , scheduler
 
