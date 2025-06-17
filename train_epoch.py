@@ -41,11 +41,12 @@ def train_epoch(epoch_index, model, dataloader, optimizer, label_list):
 
             batch = {k: v.to(DEVICE) for k, v in batch.items()}
             
-            # forward pass
-            logits = model(
+            # so mamba models (that have cache) can be used here
+            outputs = model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
             )
+            logits, cache = outputs if isinstance(outputs, tuple) else (outputs, None)
             loss = loss_fn(
                 logits.view(-1, model.num_labels),
                 batch["labels"].view(-1),

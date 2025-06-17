@@ -24,8 +24,12 @@ def validate_epoch(model, dataloader, tokenizer, label_list, batches_to_visualiz
                 
                 batch = {k: v.to(DEVICE) for k, v in batch.items()}
 
-                logits = model(input_ids=batch["input_ids"],
-                                attention_mask=batch["attention_mask"])
+                outputs = model(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
+                logits, cache = outputs if isinstance(outputs, tuple) else (outputs, None)
+                
                 loss = loss_fn(
                     logits.view(-1, model.num_labels),
                     batch["labels"].view(-1),
