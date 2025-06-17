@@ -1,6 +1,7 @@
 import os
-
+import numpy as np
 from tqdm import tqdm
+import pickle, json
 
 from datasets import load_dataset, DatasetDict, concatenate_datasets, Dataset, ClassLabel, Sequence
 from functools import partial
@@ -218,13 +219,58 @@ def get_wikiann_lv():
 
     return ds
 
+def get_translated_wikiann_lv():
+    if not os.path.exists("translated/conll_test.npy"):
+        raise FileNotFoundError("Translated WikiANN dataset not found. Generate it by running `translation.py` script.")
 
-def get_data_loaders(tokenizer, wikiann=True, lumii=True):
-    if not wikiann and not lumii:
+    with open("translated_v1/conll_train_pure.pkl", "rb") as f:
+        train_data = pickle.load(f)
+
+    with open("translated_v1/conll_validation_pure.pkl", "rb") as f:
+        val_data = pickle.load(f)
+
+    with open("translated_v1/conll_test_pure.pkl", "rb") as f:
+        test_data = pickle.load(f)
+
+
+    # print("train_data[0]:", train_data[0])
+    # exit()
+
+    ds = DatasetDict({
+        "train": Dataset.from_dict({
+            "tokens": [item[0] for item in train_data],
+            "ner_tags": [[ner_tag_map(tag) for tag in item[1]] for item in train_data],
+        }),
+        "validation": Dataset.from_dict({
+            "tokens": [item[0] for item in val_data],
+            "ner_tags": [[ner_tag_map(tag) for tag in item[1]] for item in val_data],
+        }),
+        "test": Dataset.from_dict({
+            "tokens": [item[0] for item in test_data],
+            "ner_tags": [[ner_tag_map(tag) for tag in item[1]] for item in test_data],
+        })
+    })
+    return ds
+
+
+def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=True):
+    if not wikiann and not lumii and not translated_wikiann:
         raise ValueError("get_data_loaders function expects at least one dataset to be True.")
 
     fn = partial(tokenize_and_align_labels, tokenizer=tokenizer)
     combined_parts = {"train": [], "validation": [], "test": []}
+
+    if translated_wikiann:
+        translated_wikiann_ds = get_translated_wikiann_lv()
+        print("Tokenizing Translated WikiANN dataset...")
+        translated_wikiann_ds = translated_wikiann_ds.map(fn, batched=False)
+        # same way here, we have to add the MISC labels manually
+        translated_wikiann_ds = translated_wikiann_ds.cast_column(
+            "ner_tags",
+            Sequence(feature=ClassLabel(names=label_list))
+        )
+        for split in ["train", "validation", "test"]:
+            combined_parts[split].append(translated_wikiann_ds[split])
 
     if wikiann:
         wikiann_ds = get_wikiann_lv()
@@ -261,7 +307,6 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True):
         combined_parts["validation"].append(lumii_val)
         combined_parts["test"].append(lumii_test)
 
-        # print("lumii label list:", lumii_ds.features["ner_tags"].feature.names)
 
 
     combined_ds = DatasetDict({
