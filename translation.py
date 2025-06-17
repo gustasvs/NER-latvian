@@ -11,8 +11,8 @@ model_name = "Helsinki-NLP/opus-mt-tc-big-en-lv"
 tokenizer = MarianTokenizer.from_pretrained(model_name)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
-alignment_tokenizer = AutoTokenizer.from_pretrained("bert-base-multilingual-cased")
-alignment_model = AutoModel.from_pretrained("bert-base-multilingual-cased")
+alignment_tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/LaBSE")
+alignment_model = AutoModel.from_pretrained("sentence-transformers/LaBSE")
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
