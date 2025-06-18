@@ -265,6 +265,8 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
         returns train, val, test dataloaders
     """
 
+    dataset_sizes = {"wikiann": 0, "lumii": 0, "translated_wikiann": 0}
+
     if not wikiann and not lumii and not translated_wikiann:
         raise ValueError("get_data_loaders function expects at least one dataset to be True.")
 
@@ -287,6 +289,17 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
             )
             with open("cache/translated_wikiann.pkl", "wb") as f:
                 pickle.dump(translated_wikiann_ds, f)
+        
+        dataset_sizes["translated_wikiann"] = (
+            len(translated_wikiann_ds["train"])
+            + len(translated_wikiann_ds["validation"])
+            + len(translated_wikiann_ds["test"])
+        )
+        combined_parts["train"].extend([
+            translated_wikiann_ds["train"],
+            translated_wikiann_ds["validation"],
+            translated_wikiann_ds["test"],
+        ])
 
         # we never use translated data for validation or testing
         combined_parts["train"].extend([
@@ -319,6 +332,12 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
     # wikiann always goes to validation and test splits
     combined_parts["validation"].append(wikiann_ds["validation"])
     combined_parts["test"].append(wikiann_ds["test"])
+
+    dataset_sizes["wikiann"] = (
+        len(wikiann_ds["train"])
+        + len(wikiann_ds["validation"])
+        + len(wikiann_ds["test"])
+    )
 
     if use_cache and os.path.exists("cache/lumii.pkl"):
         print("Loading LUMII dataset from cache...")
@@ -359,6 +378,12 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
     combined_parts["validation"].append(lumii_val)
     combined_parts["test"].append(lumii_test)
 
+    dataset_sizes["lumii"] = (
+            len(lumii_train)
+            + len(lumii_val)
+            + len(lumii_test)
+        )
+
     combined_ds = DatasetDict({
         split: concatenate_datasets(splits) if len(splits) > 1 else splits[0]
         for split, splits in combined_parts.items()
@@ -384,14 +409,140 @@ def get_data_loaders(tokenizer, wikiann=True, lumii=True, translated_wikiann=Tru
         combined_ds["test"], batch_size=BATCH_SIZE, collate_fn=data_collator
     )
 
-    return train_loader, val_loader, test_loader, len(label_list), label_list
+    return train_loader, val_loader, test_loader, len(label_list), label_list, dataset_sizes
+
+import matplotlib.pyplot as plt   # NEW
+
+# ──────────────────────────────────────────────────────────────────────────
+def analyze_datasets(train_loader, val_loader, test_loader, label_list, dataset_sizes=None):
+    bg_color = '#212121'
+    plt.rcParams['figure.facecolor'] = bg_color
+    plt.rcParams['axes.facecolor'] = bg_color
+    plt.rcParams['axes.edgecolor'] = 'white'
+    plt.rcParams['axes.labelcolor'] = 'white'
+    plt.rcParams['xtick.color'] = 'white'
+    plt.rcParams['ytick.color'] = 'white'
+    plt.rcParams['text.color'] = 'white'
+    plt.rcParams['legend.facecolor'] = bg_color
+    plt.rcParams['legend.edgecolor'] = 'white'
+
+    """Print tables & plots with split sizes and NER-label distributions."""
+    splits = {
+        "train": train_loader.dataset,
+        "validation": val_loader.dataset,
+        "test": test_loader.dataset,
+    }
+
+    # --- split sizes ------------------------------------------------------
+    # sizes = {name: len(ds) for name, ds in splits.items()}
+    # print("\nDataset sizes:")
+    # print(tabulate([[k, v] for k, v in sizes.items()],
+    #                headers=["Split", "Samples"], tablefmt="pretty"))
+
+    # plt.figure()
+    # plt.bar(sizes.keys(), sizes.values())
+    # plt.title("Dataset Sizes")
+    # plt.ylabel("Samples")
+    # plt.tight_layout()
+    # plt.show()
+
+    # # --- NER-label counts -------------------------------------------------
+    label_counts = {s: {lbl: 0 for lbl in label_list} for s in splits}
+    total_counts = {lbl: 0 for lbl in label_list}
+
+    for split, ds in splits.items():
+        for labels in ds["labels"]:
+            for lab in labels:
+                if lab >= 0:                      # ignore padding
+                    name = label_list[lab]
+                    label_counts[split][name] += 1
+                    total_counts[name] += 1
+
+    # # per-split tables & charts
+    # for split in splits:
+    #     print(f"\n{split.capitalize()} NER label distribution:")
+    #     print(tabulate([[l, c] for l, c in label_counts[split].items()],
+    #                    headers=["Label", "Count"], tablefmt="pretty"))
+
+    #     plt.figure()
+    #     plt.bar(label_counts[split].keys(), label_counts[split].values())
+    #     plt.title(f"{split.capitalize()} NER Label Distribution")
+    #     plt.ylabel("Occurrences")
+    #     plt.xticks(rotation=45, ha="right")
+    #     plt.tight_layout()
+    #     plt.show()
+
+    # # total table & chart
+    # Exclude the "O" class (index 0) from total_counts for display and plotting
+    filtered_total_counts = {l: c for l, c in total_counts.items() if l != "O"}
+
+    print("\nTotal NER label distribution (excluding 'O'):")
+    print(tabulate([[l, c] for l, c in filtered_total_counts.items()],
+                   headers=["Label", "Count"], tablefmt="pretty"))
+    plt.figure()
+    plt.bar(filtered_total_counts.keys(), filtered_total_counts.values())
+    plt.title("Total NER Label Distribution (excluding 'O')")
+    plt.ylabel("Occurrences")
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    plt.show()
+
+    # if dataset_sizes:
+    #     print("\nUnderlying dataset sizes:")
+    #     print(tabulate(dataset_sizes.items(),
+    #                    headers=["Dataset", "Samples"], tablefmt="pretty"))
+    #     plt.figure()
+    #     plt.bar(dataset_sizes.keys(), dataset_sizes.values())
+    #     plt.title("Source-dataset Sizes")
+    #     plt.ylabel("Samples")
+    #     plt.tight_layout()
+    #     plt.show()
+
+    entity_counts = {}
+    total_counts = {}
+    for name, ds in splits.items():
+        total = len(ds)
+        with_entity = sum(
+            1
+            for labels in ds["labels"]
+            if any(lab not in (-100, 0) for lab in labels)
+        )
+        total_counts[name] = total
+        entity_counts[name] = with_entity
+
+    # print table
+    print("\nSamples per split:")
+    print(tabulate(
+        [[k, total_counts[k], entity_counts[k]] for k in splits],
+        headers=["Split", "Total Samples", "With ≥1 Entity"],
+        tablefmt="pretty"
+    ))
+
+    # grouped bar chart
+    labels = list(splits.keys())
+    x = np.arange(len(labels))
+    width = 0.35
+
+    plt.figure()
+    plt.bar(x - width/2, [total_counts[l] for l in labels], width, label="Total")
+    plt.bar(x + width/2, [entity_counts[l] for l in labels], width, label="With ≥1 Entity")
+    plt.xticks(x, labels)
+    plt.ylabel("Count")
+    plt.title("Total vs Entity-containing Samples per Split")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    # per-split & total label charts
+    plt.show()
 
 if __name__ == "__main__":
     
-    tokenizer = AutoTokenizer.from_pretrained("distilbert-base-multilingual-cased", resume_download=None)
+    tokenizer = AutoTokenizer.from_pretrained(
+        "distilbert-base-multilingual-cased", resume_download=None)
 
-    train_loader, val_loader, test_loader, num_labels, label_list = get_data_loaders(tokenizer, wikiann=True, lumii=True)
-
+    train_loader, val_loader, test_loader, num_labels, label_list, dataset_sizes = get_data_loaders(
+        tokenizer, wikiann=True, lumii=True)
 
     print(f"Number of labels: {num_labels}")
     print(f"Label list: {label_list}")
@@ -399,4 +550,5 @@ if __name__ == "__main__":
     print(f"Validation loader size: {len(val_loader)}, total samples: {len(val_loader.dataset)}")
     print(f"Test loader size: {len(test_loader)}, total samples: {len(test_loader.dataset)}")
 
-    # preview_dataloader(train_loader, tokenizer, label_list, num_samples=20)
+    analyze_datasets(train_loader, val_loader, test_loader, label_list, dataset_sizes)
+
